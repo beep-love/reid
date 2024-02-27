@@ -30,3 +30,34 @@ def soft_margin_batch_hard_triplet_loss(anchors, positives, negatives, margin=0.
             sys.exit()
     
     return loss
+
+def soft_margin_batch_all_triplet_loss(anchors, positives, negatives):
+    P = positives.shape[0]
+    K = positives.shape[1]
+    loss = 0
+    for p in range(P):
+        m1 = anchors[p,:,:]
+        m2 = positives[p,:,:]
+        m3 = negatives[p,:,:]
+
+        # pos_dists = 1.0 - torch.matmul(m1, m1.transpose(0, 1))
+        # neg_dists = 1.0 - torch.matmul(m1, m2.transpose(0, 1))
+
+        pos_dists = torch.cdist(m1, m2)
+        neg_dists = torch.cdist(m1, m3)
+        pn_dists = torch.cdist(m2, m3)
+        
+        #print("pos_dists: ", pos_dists.shape)
+        # sum over anchors a (sum over positives p (sum over negatives n ( D(a,p) - D(a,n) )))
+
+        diffs = (2*pos_dists.repeat_interleave(K, dim=1) - neg_dists.repeat([1,K]) - pn_dists.repeat_interleave(K, dim=1) ).reshape([-1])
+        
+        #print("pos: ", pos_dists.repeat_interleave(K, dim=1).shape)
+        #print("neg: ", neg_dists.repeat([1,K]).shape)
+        #print("diffs: ", diffs.shape)
+
+        loss += torch.sum(torch.log1p(torch.exp(diffs)))
+        if torch.isnan(loss):
+            print('Got nan pos_diffs:', diffs)
+            sys.exit()
+    return loss

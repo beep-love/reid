@@ -6,6 +6,9 @@ from torchvision import transforms
 from PIL import Image
 import torch
 
+def defaultdict_list():
+    return defaultdict(list)
+
 class VehicleTripletDataset(Dataset):
     def __init__(self, root_dir, list_file, info_file, mode = 'train', transform=None, P=8, K=4):
         self.root_dir = root_dir
@@ -17,7 +20,12 @@ class VehicleTripletDataset(Dataset):
         self.vehicle_ids = []
         self.camera_ids = []
         self.vehicle_info = {}  # Load the vehicle_info.txt file and parse vehicle type and color
-        self.vehicle_camera_dict = defaultdict(lambda: defaultdict(list)) # Group images by vehicle ID and camera ID
+        
+        
+        
+        self.vehicle_camera_dict = defaultdict(defaultdict_list)    # Group images by vehicle ID and camera ID
+
+        # self.vehicle_camera_dict = defaultdict(lambda: defaultdict(list)) # Group images by vehicle ID and camera ID
 
         # Load the train_list.txt file and parse image paths, vehicle IDs, and camera IDs
         with open(os.path.join(root_dir, list_file), 'r') as file:
@@ -41,6 +49,7 @@ class VehicleTripletDataset(Dataset):
 
         self.unique_vehicle_ids = list(set(self.vehicle_ids))
         self.shuffle_vehicle_ids()
+    
     
     def shuffle_vehicle_ids(self):
         random.shuffle(self.unique_vehicle_ids)
@@ -71,8 +80,15 @@ class VehicleTripletDataset(Dataset):
             # Get a list of camera IDs for the current vehicle ID, excluding the camera ID used for the anchor image
             positive_camera_ids = [cam_id for cam_id in self.vehicle_camera_dict[vehicle_id].keys() if cam_id != camera_id]
 
+            # Get the list of indices for the current vehicle ID and camera ID
+            available_indices = self.vehicle_camera_dict[vehicle_id][camera_id]
+            
             # Sample K indices from the list of indices associated with the selected anchor image camera ID
-            indices = random.sample(self.vehicle_camera_dict[vehicle_id][camera_id], self.K)
+            # Randomly sample indices with replacement to ensure self.K values
+            indices = random.choices(available_indices, k=self.K)
+            
+            # Sample K indices from the list of indices associated with the selected anchor image camera ID
+            # indices = random.sample(self.vehicle_camera_dict[vehicle_id][camera_id], self.K)
 
             for anchor_idx in indices:
                 anchor_path = os.path.join(self.root_dir, 'images/images', self.image_paths[anchor_idx])
@@ -80,39 +96,75 @@ class VehicleTripletDataset(Dataset):
                 _, anchor_vehicle_type, anchor_vehicle_color = self.vehicle_info[self.image_paths[anchor_idx].split('/')[0]]  # vehicle_brand is not used 
 
                 # Select a positive image (same vehicle, different camera)
+                # Check if there are any positive camera IDs available
+                if positive_camera_ids:
+                    # Randomly select a camera ID from the list of positive camera IDs
+                    positive_camera_id = random.choice(positive_camera_ids)
 
-                # Randomly select a camera ID from the list of positive camera IDs
-                positive_camera_id = random.choice(positive_camera_ids)
-
-                # Randomly select an index from the list of indices associated with the selected positive camera ID
-                positive_idx = random.choice(self.vehicle_camera_dict[vehicle_id][positive_camera_id])
+                    # Randomly select an index from the list of indices associated with the selected positive camera ID
+                    positive_idx = random.choice(self.vehicle_camera_dict[vehicle_id][positive_camera_id])
+                else:
+                    # Fallback: If no other camera IDs are available, use the same camera ID as the anchor image
+                    # This is not ideal but provides a fallback to avoid the IndexError
+                    positive_camera_id = camera_id
+                    # Exclude the anchor index from the choices
+                    positive_indices = [idx for idx in self.vehicle_camera_dict[vehicle_id][positive_camera_id] 
+                                        if idx != anchor_idx
+                                        ]
+                    # Randomly select a positive index (if available)
+                    positive_idx = random.choice(positive_indices) if positive_indices else anchor_idx  # Use anchor index as a last resort
 
                 # Load the positive image
                 positive_path = os.path.join(self.root_dir, 'images/images', self.image_paths[positive_idx])
                 positive_image = Image.open(positive_path)
 
-                # Select a negative image (different vehicle, same camera)
+                # Select a negative vehicle ID that is different from the anchor vehicle ID
                 negative_vehicle_id = random.choice(list(set(self.vehicle_ids) - {vehicle_id}))
+
+                # # Choose a camera ID for the negative sample (same as anchor camera ID)
+                # camera_id = anchor_camera_id
 
                 # Negative image (different vehicle ID, same camera ID, same vehicle type, and color)
                 negative_candidates = [
-                    idx for idx in self.vehicle_camera_dict[negative_vehicle_id][camera_id]
+                    idx for idx in self.vehicle_camera_dict[negative_vehicle_id].get(camera_id, [])
                     if self.vehicle_info[self.image_paths[idx].split('/')[0]][1] == anchor_vehicle_type  # vehicle_type
-                    and self.vehicle_info[self.image_paths[idx].split('/')[0]][2] == anchor_vehicle_color # vehicle_color
+                    and self.vehicle_info[self.image_paths[idx].split('/')[0]][2] == anchor_vehicle_color  # vehicle_color
                 ]
                 if negative_candidates:
                     negative_idx = random.choice(negative_candidates)
                 else:
-                    # Fallback: choose any image with a different vehicle ID but the same vehicle color
+                    # Fallback: choose any image with a different vehicle ID, same camera id and the same vehicle color
                     negative_candidates = [
-                        idx for idx in self.vehicle_camera_dict[negative_vehicle_id][camera_id]
+                        idx for idx in self.vehicle_camera_dict[negative_vehicle_id].get(camera_id, [])
                         if self.vehicle_info[self.image_paths[idx].split('/')[0]][2] == anchor_vehicle_color  # vehicle_color
                     ]
                     if negative_candidates:
                         negative_idx = random.choice(negative_candidates)
                     else:
-                        # Further fallback: choose any image with a different vehicle ID
-                        negative_idx = random.choice(self.vehicle_camera_dict[negative_vehicle_id][camera_id])
+                        # Further fallback: choose any image with a different vehicle ID in same camera ID
+                        if self.vehicle_camera_dict[negative_vehicle_id].get(camera_id):
+                            negative_idx = random.choice(self.vehicle_camera_dict[negative_vehicle_id][camera_id])
+                        else:
+                            # Try to find an image with the same vehicle color and type from any camera
+                            negative_candidates = [
+                                idx for idx in self.vehicle_camera_dict[negative_vehicle_id]
+                                if self.vehicle_info[self.image_paths[idx].split('/')[0]][1] == anchor_vehicle_type  # vehicle_type
+                                and self.vehicle_info[self.image_paths[idx].split('/')[0]][2] == anchor_vehicle_color  # vehicle_color
+                            ]
+                            if negative_candidates:
+                                negative_idx = random.choice(negative_candidates)
+                            else:
+                                # If not found, try to find an image with the same vehicle color from any camera
+                                negative_candidates = [
+                                    idx for idx in self.vehicle_camera_dict[negative_vehicle_id]
+                                    if self.vehicle_info[self.image_paths[idx].split('/')[0]][2] == anchor_vehicle_color  # vehicle_color
+                                ]
+                                if negative_candidates:
+                                    negative_idx = random.choice(negative_candidates)
+                                else:
+                                    # If still not found, choose any image from any camera as long as the vehicle is different
+                                    negative_idx = random.choice([idx for idx in range(len(self.vehicle_ids)) if self.vehicle_ids[idx] == negative_vehicle_id])
+
                 negative_path = os.path.join(self.root_dir, 'images/images', self.image_paths[negative_idx])
                 negative_image = Image.open(negative_path)
 

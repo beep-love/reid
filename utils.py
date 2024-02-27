@@ -1,3 +1,7 @@
+import os
+import torch
+from torch.utils.data import DataLoader
+
 class InfiniteDataloader:
     def __init__(self, dataset, num_workers=0, shuffle=False, batch_size=None):
         self.dataloader = DataLoader(dataset, num_workers=num_workers, shuffle=shuffle, batch_size=batch_size)
@@ -37,7 +41,7 @@ def draw_curve(epoch, train_loss, test_loss, best_loss, best_epoch, record, x_ep
     ax0.text(1, record['test_loss'][0], 'Best val loss %f @ epoch %d' % (best_loss, best_epoch))
     if epoch == 0:
         ax0.legend()
-    fig.savefig("train-new-margin-0.1-lr-10-step.jpg")
+    fig.savefig("train-new-VERI.jpg")
 
 # Reduce learning rate
 
