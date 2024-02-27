@@ -2,10 +2,30 @@ import torch
 import torchvision
 import time
 from tqdm import tqdm
-from triplet_batch_dataset import VehicleTripletDataset
 import os
 from torch.utils.data import DataLoader
+import argparse
+import torch.backends.cudnn as cudnn
+import matplotlib.pyplot as plt
+
+# Custom imports
+from utils import load_weights, draw_curve, lr_decay, InfiniteDataloader
+from model import Net
 from triplet_loss import soft_margin_batch_hard_triplet_loss
+from triplet_batch_dataset import VehicleTripletDataset
+
+def get_args():
+    parser = argparse.ArgumentParser(description="Train on VERI WILD using triplet loss")
+    parser.add_argument("--no-cuda", action="store_true")
+    parser.add_argument("--gpu-id", default=0, type=int)
+    parser.add_argument("--lr", default=0.0001, type=float)
+    parser.add_argument("--wd", default=0.01, type=float)
+    parser.add_argument("--interval", '-i', default=20, type=int)
+    parser.add_argument('--resume', '-r', action='store_true')
+    args = parser.parse_args()
+    return args
+
+
 # Device configuration for code and data
 
 root_dir = '/home/biplav/AI_center/dataset/VERI-1.0/VERI-1'
@@ -20,23 +40,6 @@ info_file= 'train_test_split/vehicle_info.txt'
 # P = Number of identities in a batch
 # K = Number of images per identity in a batch
 ##########---------------------------------------------################
-
-
-class InfiniteDataloader:
-    def __init__(self, dataset, num_workers=0, shuffle=False, batch_size=None):
-        self.dataloader = DataLoader(dataset, num_workers=num_workers, shuffle=shuffle, batch_size=batch_size)
-        self.data_iter = iter(self.dataloader)
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        try:
-            data = next(self.data_iter)
-        except StopIteration:
-            self.data_iter = iter(self.dataloader)
-            data = next(self.data_iter)
-        return data
 
 def get_dataloaders():
     transform_train = torchvision.transforms.Compose([
@@ -82,8 +85,6 @@ def get_dataloaders():
 
     return trainloader #, valloader
 
-
-
 def train(epoch, num_iters, net, trainloader, optimizer, device, interval):
     print("\nEpoch : %d" % (epoch + 1))
     net.train()
@@ -117,4 +118,75 @@ def train(epoch, num_iters, net, trainloader, optimizer, device, interval):
     print("time:{:.2f}s Loss:{:12.8g}".format(end - start, train_loss / total))
     return train_loss / total
 
+def main():
 
+    # Parse args and move to the right directory
+
+    args = get_args()
+    os.chdir(os.path.dirname(os.path.abspath( __file__)))  # Change directory to the location of this script
+
+    # Identify CUDA device
+
+    device = "cuda:{}".format(args.gpu_id) if torch.cuda.is_available() and not args.no_cuda else "cpu"
+    if torch.cuda.is_available() and not args.no_cuda:
+        cudnn.benchmark = True
+    print('Device:', device)
+
+    # Get model object
+
+    num_pretrain_classes = 1261
+    net = Net(num_classes=num_pretrain_classes, reid=True, square=True, embedding_size=128)
+
+    if args.resume:
+        checkpoint = load_weights(net, './checkpoint/ckpt.finetune-pair-biplav.t7')
+        best_loss = checkpoint['loss']
+        start_epoch = checkpoint['epoch']
+        best_epoch = start_epoch
+    else:
+        load_weights(net, './checkpoint/ckpt-mars.t7')
+        best_loss = None
+        start_epoch = 0
+        
+    net.to(device)
+
+    # Set up optimizer
+
+    optimizer = torch.optim.SGD(net.parameters(), args.lr, momentum=0.9, weight_decay=args.wd)
+    # optimizer = torch.optim.RMSprop(net.parameters(), args.lr, weight_decay=args.wd, momentum=0.9)
+    # optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.wd)
+
+    # Plot loss/accuracy figure
+    x_epoch = []
+    record = {'train_loss':[], 'test_loss':[]}
+    fig = plt.figure()
+    ax0 = fig.add_subplot(111, title="loss with margin 0.1")
+
+    trainloader, testloader = get_dataloaders()
+
+    # Run test set (validation set) before training to get initial loss
+
+    num_test_iters = 50
+    
+    test_loss = test(start_epoch-1, num_test_iters, net, device, testloader, best_loss, args.interval)
+    
+    if best_loss is None or test_loss < best_loss:
+        best_loss = test_loss
+        best_epoch = start_epoch
+    draw_curve(start_epoch-1, None, test_loss, best_loss, best_epoch, record, x_epoch, ax0, fig)
+
+    # Run 200 epochs
+
+    for epoch in range(start_epoch, start_epoch+200):
+        # Get data loaders in each epoch 
+        trainloader, testloader = get_dataloaders()
+        train_loss = train(epoch, 240, net, trainloader, optimizer, device, args.interval)
+        test_loss = test(epoch, num_test_iters, net, device, testloader, best_loss, args.interval)
+        if test_loss < best_loss:
+            best_loss = test_loss
+            best_epoch = epoch+1
+        draw_curve(epoch+1, train_loss, test_loss, best_loss, best_epoch, record, x_epoch, ax0, fig)
+        if (epoch+1)%10==0:
+            lr_decay(optimizer)
+
+if __name__ == '__main__':
+    main()
