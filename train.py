@@ -66,23 +66,23 @@ def get_dataloaders():
         end = time.time()
         print("time:{:.2f}s".format(end - start))
 
-    # if os.path.isfile('val-pair-dataset.pt'):
-    #     print('Loading pickled validation dataset from val-pair-dataset.pt...')
-    #     val_dataset = torch.load('val-pair-dataset.pt')
+    if os.path.isfile('val-pair-dataset.pt'):
+        print('Loading pickled validation dataset from val-pair-dataset.pt...')
+        val_dataset = torch.load('val-pair-dataset.pt')
     
-    # else:
-    #     start = time.time()
-    #     print('\nPreparing validation dataset. This may take a while...')
-    #     val_dataset = VehicleTripletDataset(root_dir=root_dir, list_file=list_file, info_file= info_file, mode='val', transform=transform_test, P=8, K=4)
-    #     torch.save(val_dataset, 'val-pair-dataset.pt')
-    #     end = time.time()
-    #     print("time:{:.2f}s".format(end - start))
+    else:
+        start = time.time()
+        print('\nPreparing validation dataset. This may take a while...')
+        val_dataset = VehicleTripletDataset(root_dir=root_dir, list_file=list_file, info_file= info_file, mode='val', transform=transform_test, P=8, K=4)
+        torch.save(val_dataset, 'val-pair-dataset.pt')
+        end = time.time()
+        print("time:{:.2f}s".format(end - start))
     
 
     trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=None, num_workers=0, shuffle=False)
-    # valloader = torch.utils.data.DataLoader(val_dataset, batch_size=None, num_workers=0, shuffle=False)
+    valloader = torch.utils.data.DataLoader(val_dataset, batch_size=None, num_workers=0, shuffle=False)
 
-    return trainloader #, valloader
+    return trainloader , valloader
 
 def train(epoch, num_iters, net, trainloader, optimizer, device, interval):
     print("\nEpoch : %d" % (epoch + 1))
@@ -97,10 +97,6 @@ def train(epoch, num_iters, net, trainloader, optimizer, device, interval):
         # print(P, K)
         anchors, positives, negatives = anchors.to(device), positives.to(device), negatives.to(device)
         # print(anchors.shape, positives.shape, negatives.shape)
-        # Extract representative embeddings
-        # anchor_outputs = net(anchors.view(P * K, 3, *anchors.shape[2:]))
-        # positive_outputs = net(positives.view(P * K, 3, *positives.shape[2:]))
-        # negative_outputs = net(negatives.view(P * K, 3, *negatives.shape[2:]))
 
         anchor_outputs = net(anchors)
         positive_outputs = net(positives)
@@ -135,9 +131,10 @@ def test(epoch, net, device, testloader, best_loss):
             anchors, positives, negatives = anchors.to(device), positives.to(device), negatives.to(device)
 
             # Feed forward
-            anchor_outputs = net(anchors.view(P * K, 3, *anchors.shape[2:]))
-            positive_outputs = net(positives.view(P * K, 3, *positives.shape[2:]))
-            negative_outputs = net(negatives.view(P * K, 3, *negatives.shape[2:]))
+            anchor_outputs = net(anchors)
+            positive_outputs = net(positives)
+            negative_outputs = net(negatives)
+
 
             # Calculate loss
             loss = soft_margin_batch_all_triplet_loss(anchor_outputs, positive_outputs, negative_outputs)
@@ -211,18 +208,17 @@ def main():
     fig = plt.figure()
     ax0 = fig.add_subplot(111, title="loss with margin 0.1")
 
-    # trainloader, testloader = get_dataloaders()
-    trainloader = get_dataloaders()
+    trainloader, testloader = get_dataloaders()
 
     # Run test set (validation set) before training to get initial loss
-    num_train_iters = 5000         # --> README.md explains why this is 5000
+    num_train_iters = 50         # --> README.md explains why this is 5000
     
-    # test_loss = test(start_epoch-1, net, device, testloader, best_loss)
+    test_loss = test(start_epoch-1, net, device, testloader, best_loss)
 
-    # if best_loss is None or test_loss < best_loss:
-    #     best_loss = test_loss
-    #     best_epoch = start_epoch
-    # draw_curve(start_epoch-1, None, test_loss, best_loss, best_epoch, record, x_epoch, ax0, fig)
+    if best_loss is None or test_loss < best_loss:
+        best_loss = test_loss
+        best_epoch = start_epoch
+    draw_curve(start_epoch-1, None, test_loss, best_loss, best_epoch, record, x_epoch, ax0, fig)
 
     # Run 200 epochs
 
@@ -235,11 +231,11 @@ def main():
 
         train_loss = train(epoch, num_train_iters, net, trainloader, optimizer, device, args.interval)
         print (f"{epoch+1}:{train_loss}")
-        # test_loss = test(epoch, net, device, testloader, best_loss)
-        # if test_loss < best_loss:
-        #     best_loss = test_loss
-        #     best_epoch = epoch+1
-        # draw_curve(epoch+1, train_loss, test_loss , best_loss, best_epoch, record, x_epoch, ax0, fig)
+        test_loss = test(epoch, net, device, testloader, best_loss)
+        if test_loss < best_loss:
+            best_loss = test_loss
+            best_epoch = epoch+1
+        draw_curve(epoch+1, train_loss, test_loss , best_loss, best_epoch, record, x_epoch, ax0, fig)
         if (epoch+1)%10==0:
             lr_decay(optimizer)
 
