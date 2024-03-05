@@ -9,6 +9,7 @@ import multiprocessing
 import logging
 from tqdm import tqdm
 import time
+from memory_profiler import profile
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
@@ -23,7 +24,7 @@ def precompute_vehicle_attributes(vehicle_info, image_paths, vehicle_ids):
 
 # # Function to find similar vehicles(different vehicle_id) in same camera optimized for less iterations
 
-
+@profile
 def find_similar_vehicles_same_camera(args):
     vehicle_id, vehicle_attributes, vehicle_camera_dict = args
     similar_vehicles_same_camera = defaultdict(set)  # Use a set for faster membership check
@@ -41,7 +42,7 @@ def find_similar_vehicles_same_camera(args):
 
     return vehicle_id, {camera_id: list(vehicles) for camera_id, vehicles in similar_vehicles_same_camera.items()}  # Convert sets to lists before returning
 
-
+@profile
 def find_similar_vehicles_different_camera(args):
     vehicle_id, vehicle_attributes, vehicle_camera_dict = args
     similar_vehicles_different_camera = set()  # Use a set for faster membership check
@@ -149,10 +150,15 @@ class VehicleTripletDataset(Dataset):
         print(" PRECOMPUTING VEHICLE ATTRIBUTES")
         start_time = time.time()
         # Precompute vehicle attributes
-        agrs_vehicle_attributes = (self.vehicle_info, self.image_paths, self.vehicle_ids)
         vehicle_attributes = precompute_vehicle_attributes(self.vehicle_info, self.image_paths, self.vehicle_ids)
-        with multiprocessing.Pool(processes=(multiprocessing.cpu_count()-2)) as pool:
-            vehicle_attributes = pool.map(precompute_vehicle_attributes, args_vehicle_attributes)
+
+    # NEED TO TEST THIS PART TO Calculate the time taken to precompute vehicle attributes : 
+    # Currently it takes 163 seconds in above implementation.
+        
+        # args_vehicle_attributes = [self.vehicle_info, self.image_paths, self.vehicle_ids]
+        # with multiprocessing.Pool(processes=(multiprocessing.cpu_count()-2)) as pool:
+        #     vehicle_attributes = pool.map(precompute_vehicle_attributes, args_vehicle_attributes)
+
         time_elapsed = time.time() - start_time
         print(f"Time taken to precompute vehicle attributes: {time_elapsed:.2f} seconds")
 
@@ -163,9 +169,9 @@ class VehicleTripletDataset(Dataset):
         args_list_same_cam = [(vehicle_id, vehicle_attributes, self.vehicle_camera_dict) for vehicle_id in self.vehicle_ids]
 
         # In your class initialization or method where you use multiprocessing
-        with multiprocessing.Pool(processes=(multiprocessing.cpu_count()-2)) as pool:
+        with multiprocessing.Pool(processes=(multiprocessing.cpu_count()-4)) as pool:
             results = []
-            for result in tqdm(pool.imap_unordered(find_similar_vehicles_same_camera, args_list_same_cam), total=len(args_list_same_cam)):
+            for result in tqdm(pool.imap_unordered(find_similar_vehicles_same_camera, args_list_same_cam, chunksize=25), total=len(args_list_same_cam)):
                 results.append(result)
 
         # Update the dictionary with the results
@@ -181,9 +187,9 @@ class VehicleTripletDataset(Dataset):
         # args_list_different_cam = [(vehicle_id, self.vehicle_info, self.vehicle_camera_dict, self.image_paths, self.vehicle_ids) for vehicle_id in self.vehicle_ids]
 
         # Use multiprocessing to find similar vehicles
-        with multiprocessing.Pool(processes=(multiprocessing.cpu_count() -2) ) as pool:
+        with multiprocessing.Pool(processes=(multiprocessing.cpu_count() -4) ) as pool:
             results = []
-            for result in tqdm(pool.imap_unordered(find_similar_vehicles_different_camera, args_list_different_cam), total=len(args_list_same_cam)):
+            for result in tqdm(pool.imap_unordered(find_similar_vehicles_different_camera, args_list_different_cam, chunksize=25), total=len(args_list_same_cam)):
                 results.append(result)
             # results = pool.map(find_similar_vehicles_different_camera, args_list_different_cam)
 
