@@ -28,6 +28,7 @@ def precompute_vehicle_attributes(vehicle_info, image_paths, vehicle_ids):
 def find_similar_vehicles_same_camera(args):
     vehicle_id, vehicle_attributes, vehicle_camera_dict = args
     similar_vehicles_same_camera = defaultdict(set)  # Use a set for faster membership check
+    similar_vehicles_different_camera = set()  # Use a set for faster membership check
     vtype, color = vehicle_attributes[vehicle_id]
     current_vehicle_cameras = set(vehicle_camera_dict[vehicle_id].keys())
 
@@ -37,22 +38,27 @@ def find_similar_vehicles_same_camera(args):
             if vtype == other_vtype and color == other_color:
                 other_vehicle_cameras = set(vehicle_camera_dict[other_id].keys())
                 common_cameras = current_vehicle_cameras.intersection(other_vehicle_cameras)
-                for camera_id in common_cameras:
-                    similar_vehicles_same_camera[camera_id].add(other_id)
+                if common_cameras:
+                    for camera_id in common_cameras:
+                        similar_vehicles_same_camera[camera_id].add(other_id)
+                else :
+                    similar_vehicles_different_camera.add(other_id)
 
-    return vehicle_id, {camera_id: list(vehicles) for camera_id, vehicles in similar_vehicles_same_camera.items()}  # Convert sets to lists before returning
+    return vehicle_id, {camera_id: list(vehicles) for camera_id, vehicles in similar_vehicles_same_camera.items()}, list(similar_vehicles_different_camera)  
+                        # Convert sets to lists before returning                                                     # Convert back to a list before returning
 
-@profile
-def find_similar_vehicles_different_camera(args):
-    vehicle_id, vehicle_attributes, vehicle_camera_dict = args
-    similar_vehicles_different_camera = set()  # Use a set for faster membership check
-    vtype, color = vehicle_attributes[vehicle_id]
-    for other_id in vehicle_attributes:
-        if vehicle_id != other_id:
-            other_vtype, other_color = vehicle_attributes[other_id]
-            if vtype == other_vtype and color == other_color:
-                similar_vehicles_different_camera.add(other_id)
-    return vehicle_id, list(similar_vehicles_different_camera)  # Convert back to a list before returning
+# Not needed integrated above
+# @profile
+# def find_similar_vehicles_different_camera(args):
+#     vehicle_id, vehicle_attributes, vehicle_camera_dict = args
+#     similar_vehicles_different_camera = set()  # Use a set for faster membership check
+#     vtype, color = vehicle_attributes[vehicle_id]
+#     for other_id in vehicle_attributes:
+#         if vehicle_id != other_id:
+#             other_vtype, other_color = vehicle_attributes[other_id]
+#             if vtype == other_vtype and color == other_color:
+#                 similar_vehicles_different_camera.add(other_id)
+#     return vehicle_id, list(similar_vehicles_different_camera)  
 
 
 # def find_similar_vehicles_same_camera(args):
@@ -162,7 +168,7 @@ class VehicleTripletDataset(Dataset):
         time_elapsed = time.time() - start_time
         print(f"Time taken to precompute vehicle attributes: {time_elapsed:.2f} seconds")
 
-        print("PRECOMPUTING SIMILAR VEHICLE AVAILABLE IN SAME CAMERA IDS")
+        print("PRECOMPUTING SIMILAR VEHICLE AVAILABLE IN SAME AND DIFFERENT CAMERA IDS")
 
         start_time = time.time()
         # Prepare arguments for multiprocessing
@@ -171,33 +177,36 @@ class VehicleTripletDataset(Dataset):
         # In your class initialization or method where you use multiprocessing
         with multiprocessing.Pool(processes=(multiprocessing.cpu_count()-4)) as pool:
             results = []
-            for result in tqdm(pool.imap_unordered(find_similar_vehicles_same_camera, args_list_same_cam, chunksize=25), total=len(args_list_same_cam)):
+            for result in tqdm(pool.imap_unordered(find_similar_vehicles_same_camera, args_list_same_cam, chunksize=5), total=len(args_list_same_cam)):
                 results.append(result)
 
         # Update the dictionary with the results
-        for vehicle_id, similar_vehicles_dict in results:
-            self.similar_vehicle_same_camera[vehicle_id].update(similar_vehicles_dict)
-        time_elapsed = time.time() - start_time
-        print("Time taken to precompute similar vehicles in same camera: {time_elapsed:.2f} seconds")
-
-        print("PRECOMPUTING SIMILAR VEHICLE AVAILABLE IN DIFFERENT CAMERA IDS")
-        start_time = time.time()
-        args_list_different_cam = [(vehicle_id, vehicle_attributes, self.vehicle_camera_dict) for vehicle_id in self.vehicle_ids]
-
-        # args_list_different_cam = [(vehicle_id, self.vehicle_info, self.vehicle_camera_dict, self.image_paths, self.vehicle_ids) for vehicle_id in self.vehicle_ids]
-
-        # Use multiprocessing to find similar vehicles
-        with multiprocessing.Pool(processes=(multiprocessing.cpu_count() -4) ) as pool:
-            results = []
-            for result in tqdm(pool.imap_unordered(find_similar_vehicles_different_camera, args_list_different_cam, chunksize=25), total=len(args_list_same_cam)):
-                results.append(result)
-            # results = pool.map(find_similar_vehicles_different_camera, args_list_different_cam)
-
-        # Update the dictionary with the results
-        for vehicle_id, similar_vehicles in results:
+        for vehicle_id, similar_vehicles_dict, similar_vehicles in results:
+            self.similar_vehicles_same_camera[vehicle_id].update(similar_vehicles_dict)
             self.similar_vehicles_different_camera[vehicle_id] = similar_vehicles
+
         time_elapsed = time.time() - start_time
-        print(f"Time taken to precompute similar vehicles in different camera: {time_elapsed:.2f} seconds")
+        print("Time taken to precompute similar vehicles in same and different camera: {time_elapsed:.2f} seconds")
+
+        # print("PRECOMPUTING SIMILAR VEHICLE AVAILABLE IN DIFFERENT CAMERA IDS")
+        # start_time = time.time()
+        # args_list_different_cam = [(vehicle_id, vehicle_attributes, self.vehicle_camera_dict) for vehicle_id in self.vehicle_ids]
+
+        # # args_list_different_cam = [(vehicle_id, self.vehicle_info, self.vehicle_camera_dict, self.image_paths, self.vehicle_ids) for vehicle_id in self.vehicle_ids]
+
+        # # Use multiprocessing to find similar vehicles
+        # with multiprocessing.Pool(processes=(multiprocessing.cpu_count() -4) ) as pool:
+        #     results = []
+        #     for result in tqdm(pool.imap_unordered(find_similar_vehicles_different_camera, args_list_different_cam, chunksize=25), total=len(args_list_same_cam)):
+        #         results.append(result)
+        #     # results = pool.map(find_similar_vehicles_different_camera, args_list_different_cam)
+
+        # # Update the dictionary with the results
+        # for vehicle_id, similar_vehicles in results:
+        #     self.similar_vehicles_different_camera[vehicle_id] = similar_vehicles
+        # time_elapsed = time.time() - start_time
+        # print(f"Time taken to precompute similar vehicles in different camera: {time_elapsed:.2f} seconds")
+        
         print("Initialized VehicleTripletDataset")
 
     
