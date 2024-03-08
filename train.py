@@ -27,7 +27,7 @@ def get_args():
 
 
 # Device configuration for code and data
-root_dir = '/home/biplav/AI_center/dataset/VERI-1.0/VERI-1/'
+root_dir = '/home/biplav/AI_center/dataset/VERI-1.0/VERI-1/'  #IN MY PC # CHANGE FOR QNAP AND BAKENEKO
 list_file= 'train_test_split/train_list_start0.txt'
 info_file= 'train_test_split/vehicle_info.txt'
 
@@ -183,7 +183,7 @@ def main():
 
     num_pretrain_classes = 1261
     net = Net(num_classes=num_pretrain_classes, reid=True, square=True, embedding_size=128)
-
+    net = torch.nn.DataParallel(net, device_ids=[4, 5, 6, 7])
     if args.resume:
         checkpoint = load_weights(net, './checkpoint/ckpt.finetune-pair-biplav-epoch55.t7')
         best_loss = checkpoint['loss']
