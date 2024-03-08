@@ -28,6 +28,7 @@ def get_args():
 
 # Device configuration for code and data
 root_dir = '/home/biplav/AI_center/dataset/VERI-1.0/VERI-1/'  #IN MY PC # CHANGE FOR QNAP AND BAKENEKO
+# root_dir = '/home/biplav/qnap/VERI-1'                           # IN QNAP for BAKENEKO
 list_file= 'train_test_split/train_list_start0.txt'
 info_file= 'train_test_split/vehicle_info.txt'
 
