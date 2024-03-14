@@ -14,6 +14,10 @@ from model import Net
 from triplet_loss import soft_margin_batch_hard_triplet_loss, soft_margin_batch_all_triplet_loss
 from triplet_batch_dataset import VehicleTripletDataset
 
+
+os.environ["CUDA_VISIBLE_DEVICES"] = '4,5,6,7'
+
+
 def get_args():
     parser = argparse.ArgumentParser(description="Train on VERI WILD using triplet loss")
     parser.add_argument("--no-cuda", action="store_true")
@@ -27,8 +31,8 @@ def get_args():
 
 
 # Device configuration for code and data
-root_dir = '/home/biplav/AI_center/dataset/VERI-1.0/VERI-1/'  #IN MY PC # CHANGE FOR QNAP AND BAKENEKO
-# root_dir = '/home/biplav/qnap/VERI-1'                           # IN QNAP for BAKENEKO
+# root_dir = '/home/biplav/AI_center/dataset/VERI-1.0/VERI-1/'  #IN MY PC # CHANGE FOR QNAP AND BAKENEKO
+root_dir = '/home/biplav/reid_train/data/VERI-1'                           # IN QNAP for BAKENEKO
 list_file= 'train_test_split/train_list_start0.txt'
 info_file= 'train_test_split/vehicle_info.txt'
 
@@ -40,6 +44,8 @@ info_file= 'train_test_split/vehicle_info.txt'
 # P = Number of identities in a batch
 # K = Number of images per identity in a batch
 ##########---------------------------------------------################
+p = 64
+k = 4
 
 def get_dataloaders():
     transform_train = torchvision.transforms.Compose([
@@ -56,32 +62,32 @@ def get_dataloaders():
         torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.226, 0.226, 0.226])
     ])
 
-    if os.path.isfile('train-pair-dataset.pt'):
-        print('Loading pickled train dataset from train-pair-dataset.pt...')
-        train_dataset = torch.load('train-pair-dataset.pt')
+    if os.path.isfile(f'train-pair-dataset_{p}_{k}.pt'):
+        print(f'Loading pickled train dataset from train-pair-dataset_{p}_{k}.pt...')
+        train_dataset = torch.load(f'train-pair-dataset_{p}_{k}.pt')
     else:
         start = time.time()
         print('\nPreparing training dataset. This may take a while...')
-        train_dataset = VehicleTripletDataset(root_dir=root_dir, list_file=list_file, info_file= info_file, mode='train', transform=transform_train, P=8, K=4)
-        torch.save(train_dataset, 'train-pair-dataset.pt')
+        train_dataset = VehicleTripletDataset(root_dir=root_dir, list_file=list_file, info_file= info_file, mode='train', transform=transform_train, P=p, K=k)
+        torch.save(train_dataset, f'train-pair-dataset_{p}_{k}.pt')
         end = time.time()
         print("time:{:.2f}s".format(end - start))
 
-    if os.path.isfile('val-pair-dataset.pt'):
-        print('Loading pickled validation dataset from val-pair-dataset.pt...')
-        val_dataset = torch.load('val-pair-dataset.pt')
+    if os.path.isfile(f'val-pair-dataset_{p}_{k}.pt'):
+        print(f'Loading pickled validation dataset from val-pair-dataset_{p}_{k}.pt...')
+        val_dataset = torch.load(f'val-pair-dataset_{p}_{k}.pt')
     
     else:
         start = time.time()
         print('\nPreparing validation dataset. This may take a while...')
-        val_dataset = VehicleTripletDataset(root_dir=root_dir, list_file=list_file, info_file= info_file, mode='val', transform=transform_test, P=8, K=4)
-        torch.save(val_dataset, 'val-pair-dataset.pt')
+        val_dataset = VehicleTripletDataset(root_dir=root_dir, list_file=list_file, info_file= info_file, mode='val', transform=transform_test, P=p, K=k)
+        torch.save(val_dataset, f'val-pair-dataset_{p}_{k}.pt')
         end = time.time()
         print("time:{:.2f}s".format(end - start))
     
 
-    trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=None, num_workers=0, shuffle=False)
-    valloader = torch.utils.data.DataLoader(val_dataset, batch_size=None, num_workers=0, shuffle=False)
+    trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=None, num_workers=48, shuffle=False)
+    valloader = torch.utils.data.DataLoader(val_dataset, batch_size=None, num_workers=48, shuffle=False)
 
     return trainloader , valloader
 
@@ -92,10 +98,9 @@ def train(epoch, num_iters, net, trainloader, optimizer, device, interval):
     total = 0
     start = time.time()
 
-    for it in tqdm(range(num_iters)):
-        labels, anchors, positives, negatives = next(iter(trainloader))  #[P*K, 3, 128, 128]
+    for labels, anchors, positives, negatives in tqdm(trainloader, total=num_iters):
         # P, K = positives.shape[0], positives.shape[1]
-        # print(P, K)
+        # print(P, K)                                   #[P*K, 3, 128, 128]
         anchors, positives, negatives = anchors.to(device), positives.to(device), negatives.to(device)
         # print(anchors.shape, positives.shape, negatives.shape)
 
@@ -119,7 +124,7 @@ def train(epoch, num_iters, net, trainloader, optimizer, device, interval):
     print("time:{:.2f}s Loss:{:12.8g}".format(end - start, train_loss / total))
     return train_loss / total
 
-def test(epoch, net, device, testloader, best_loss):
+def test(epoch, num_iters, net, device, testloader, best_loss):
     net.eval()
     test_loss = 0.
     total = 0
@@ -127,8 +132,8 @@ def test(epoch, net, device, testloader, best_loss):
 
     with torch.no_grad():
         print('Testing on validation set...')
-        for labels, anchors, positives, negatives in tqdm(testloader):
-            P, K = positives.shape[0], positives.shape[1]
+        for labels, anchors, positives, negatives in tqdm(testloader, total=num_iters):
+            # P, K = positives.shape[0], positives.shape[1]
             anchors, positives, negatives = anchors.to(device), positives.to(device), negatives.to(device)
 
             # Feed forward
@@ -138,11 +143,11 @@ def test(epoch, net, device, testloader, best_loss):
 
 
             # Calculate loss
-            loss = soft_margin_batch_all_triplet_loss(anchor_outputs, positive_outputs, negative_outputs)
+            loss = soft_margin_batch_hard_triplet_loss(anchor_outputs, positive_outputs, negative_outputs)
 
             # Accumulate stats
             test_loss += loss.item()
-            total += P * K
+            total += p * k
 
     end = time.time()
     avg_loss = test_loss / total
@@ -175,16 +180,25 @@ def main():
 
     # Identify CUDA device
 
-    device = "cuda:{}".format(args.gpu_id) if torch.cuda.is_available() and not args.no_cuda else "cpu"
-    if torch.cuda.is_available() and not args.no_cuda:
-        cudnn.benchmark = True
+    # device = "cuda:{}".format(args.gpu_id) if torch.cuda.is_available() and not args.no_cuda else "cpu"
+    # if torch.cuda.is_available() and not args.no_cuda:
+    #     cudnn.benchmark = True
+    # print('Device:', device)
+    
+    # Identify CUDA device
+    # device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
+    # if torch.cuda.is_available() and not args.no_cuda:
+    #     cudnn.benchmark = True
+    device = torch.device("cuda:0" if torch.cuda.is_available() and not args.no_cuda else "cpu")
     print('Device:', device)
+
 
     # Get model object
 
     num_pretrain_classes = 1261
     net = Net(num_classes=num_pretrain_classes, reid=True, square=True, embedding_size=128)
-    net = torch.nn.DataParallel(net, device_ids=[4, 5, 6, 7])
+    net.to(device)
+
     if args.resume:
         checkpoint = load_weights(net, './checkpoint/ckpt.finetune-pair-biplav-epoch55.t7')
         best_loss = checkpoint['loss']
@@ -194,9 +208,11 @@ def main():
         load_weights(net, './checkpoint/ckpt-mars.t7')
         best_loss = None
         start_epoch = 0
-        
-    net.to(device)
 
+    # if torch.cuda.device_count() > 1:
+    #net = torch.nn.DataParallel(net, device_ids=[5,6,7])   
+    net = torch.nn.DataParallel(net)   
+    
     # Set up optimizer
 
     optimizer = torch.optim.SGD(net.parameters(), args.lr, momentum=0.9, weight_decay=args.wd)
@@ -212,14 +228,16 @@ def main():
     trainloader, testloader = get_dataloaders()
 
     # Run test set (validation set) before training to get initial loss
-    num_train_iters = 50         # --> README.md explains why this is 5000
+    # num_train_iters = 5000        # --> README.md explains why this is 5000
+    num_train_iters = len(trainloader)
+    num_test_iters = len(testloader)
     
-    test_loss = test(start_epoch-1, net, device, testloader, best_loss)
+    # test_loss = test(start_epoch-1, num_test_iters, net, device, testloader, best_loss)
 
-    if best_loss is None or test_loss < best_loss:
-        best_loss = test_loss
-        best_epoch = start_epoch
-    draw_curve(start_epoch-1, None, test_loss, best_loss, best_epoch, record, x_epoch, ax0, fig)
+    # if best_loss is None or test_loss < best_loss:
+    #     best_loss = test_loss
+    #     best_epoch = start_epoch
+    # draw_curve(start_epoch-1, None, test_loss, best_loss, best_epoch, record, x_epoch, ax0, fig)
 
     # Run 200 epochs
 
@@ -232,7 +250,7 @@ def main():
 
         train_loss = train(epoch, num_train_iters, net, trainloader, optimizer, device, args.interval)
         print (f"{epoch+1}:{train_loss}")
-        test_loss = test(epoch, net, device, testloader, best_loss)
+        test_loss = test(epoch, num_test_iters, net, device, testloader, best_loss)
         if test_loss < best_loss:
             best_loss = test_loss
             best_epoch = epoch+1

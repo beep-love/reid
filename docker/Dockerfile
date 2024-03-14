@@ -5,7 +5,7 @@ FROM pytorch/pytorch:latest
 WORKDIR /home/biplav/reid_train
 
 # Copy only the requirements.txt file
-COPY ../requirements.txt .
+COPY requirements.txt .
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

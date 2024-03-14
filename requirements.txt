@@ -1,4 +1,6 @@
-torch
-torchvision
+#torch
+#torchvision
 tqdm
 matplotlib
+torchviz
+memory_profiler

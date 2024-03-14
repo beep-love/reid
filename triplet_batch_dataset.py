@@ -24,7 +24,7 @@ def precompute_vehicle_attributes(vehicle_info, image_paths, vehicle_ids):
 
 # # Function to find similar vehicles(different vehicle_id) in same camera optimized for less iterations
 
-@profile
+# @profile
 def find_similar_vehicles_same_camera(args):
     vehicle_id, vehicle_attributes, vehicle_camera_dict = args
     similar_vehicles_same_camera = defaultdict(set)  # Use a set for faster membership check
@@ -44,7 +44,7 @@ def find_similar_vehicles_same_camera(args):
                 else :
                     similar_vehicles_different_camera.add(other_id)
 
-    return vehicle_id, {camera_id: list(vehicles) for camera_id, vehicles in similar_vehicles_same_camera.items()}, list(similar_vehicles_different_camera)  
+    return vehicle_id, {camera_id: list(vehicles) for camera_id, vehicles in similar_vehicles_same_camera.items()}, list(similar_vehicles_different_camera) 
                         # Convert sets to lists before returning                                                     # Convert back to a list before returning
 
 # Not needed integrated above
@@ -91,7 +91,7 @@ def defaultdict_list():
     return defaultdict(list)
 
 class VehicleTripletDataset(Dataset):
-    def __init__(self, root_dir, list_file, info_file, mode = 'train', transform=None, P=8, K=4):
+    def __init__(self, root_dir, list_file, info_file, mode = 'train', transform=None, P=4, K=4):
         self.root_dir = root_dir
         self.transform = transform
         self.P = P
@@ -150,7 +150,7 @@ class VehicleTripletDataset(Dataset):
         print("SHUFFLED VEHICLE IDS")
 
         # Initialize the dictionary to store similar vehicles
-        self.similar_vehicles_same_camera = defaultdict(list)
+        self.similar_vehicles_same_camera = defaultdict(dict)
         self.similar_vehicles_different_camera = defaultdict(list)
 
         print(" PRECOMPUTING VEHICLE ATTRIBUTES")
@@ -175,9 +175,9 @@ class VehicleTripletDataset(Dataset):
         args_list_same_cam = [(vehicle_id, vehicle_attributes, self.vehicle_camera_dict) for vehicle_id in self.vehicle_ids]
 
         # In your class initialization or method where you use multiprocessing
-        with multiprocessing.Pool(processes=(multiprocessing.cpu_count()-4)) as pool:
+        with multiprocessing.Pool(processes=(multiprocessing.cpu_count()//2)) as pool:
             results = []
-            for result in tqdm(pool.imap_unordered(find_similar_vehicles_same_camera, args_list_same_cam, chunksize=5), total=len(args_list_same_cam)):
+            for result in tqdm(pool.imap_unordered(find_similar_vehicles_same_camera, args_list_same_cam, chunksize=100), total=len(args_list_same_cam)):
                 results.append(result)
 
         # Update the dictionary with the results
@@ -186,7 +186,7 @@ class VehicleTripletDataset(Dataset):
             self.similar_vehicles_different_camera[vehicle_id] = similar_vehicles
 
         time_elapsed = time.time() - start_time
-        print("Time taken to precompute similar vehicles in same and different camera: {time_elapsed:.2f} seconds")
+        print(f"Time taken to precompute similar vehicles in same and different camera: {time_elapsed:.2f} seconds")
 
         # print("PRECOMPUTING SIMILAR VEHICLE AVAILABLE IN DIFFERENT CAMERA IDS")
         # start_time = time.time()
@@ -195,9 +195,9 @@ class VehicleTripletDataset(Dataset):
         # # args_list_different_cam = [(vehicle_id, self.vehicle_info, self.vehicle_camera_dict, self.image_paths, self.vehicle_ids) for vehicle_id in self.vehicle_ids]
 
         # # Use multiprocessing to find similar vehicles
-        # with multiprocessing.Pool(processes=(multiprocessing.cpu_count() -4) ) as pool:
+        # with multiprocessing.Pool(processes=(multiprocessing.cpu_count()//2) ) as pool:
         #     results = []
-        #     for result in tqdm(pool.imap_unordered(find_similar_vehicles_different_camera, args_list_different_cam, chunksize=25), total=len(args_list_same_cam)):
+        #     for result in tqdm(pool.imap_unordered(find_similar_vehicles_different_camera, args_list_different_cam, chunksize=100), total=len(args_list_same_cam)):
         #         results.append(result)
         #     # results = pool.map(find_similar_vehicles_different_camera, args_list_different_cam)
 
@@ -340,7 +340,7 @@ class VehicleTripletDataset(Dataset):
     # New implementation ensuring we create a dictionary of similar vehicles and sample from it
     # Negative image (different vehicle ID, same camera ID, same vehicle type, and color)
 
-                if self.similar_vehicles_same_camera[vehicle_id][camera_id]:
+                if camera_id in self.similar_vehicles_same_camera[vehicle_id]:
                     negative_vehicle_id = random.choice(self.similar_vehicles_same_camera[vehicle_id][camera_id])
                     negative_candidates = self.vehicle_camera_dict[negative_vehicle_id][camera_id]
                 else:
